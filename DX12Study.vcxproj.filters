@@ -30,6 +30,9 @@
     <ClInclude Include="Win32Application.h">
       <Filter>소스 파일</Filter>
     </ClInclude>
+    <ClInclude Include="D3D12HelloTriangle.h">
+      <Filter>소스 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="D3D12HelloWindow.cpp">
@@ -44,8 +47,14 @@
     <ClCompile Include="Win32Application.cpp">
       <Filter>헤더 파일</Filter>
     </ClCompile>
+    <ClCompile Include="D3D12HelloTriangle.cpp">
+      <Filter>헤더 파일</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Shaders.HLSL" />
   </ItemGroup>
 </Project>

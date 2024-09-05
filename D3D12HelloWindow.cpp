@@ -241,6 +241,7 @@ void D3D12HelloWindow::WaitForPreviousFrame()
 
     // Signal and increment the fence value.
     // Fence 값 증가를 signal 함.
+    // Signal() Fence 값이 원하는 값으로 도달할 때 통지를 받는 함수
     const UINT64 fence = m_fenceValue;
     ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), fence));
     m_fenceValue++;

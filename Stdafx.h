@@ -1,6 +1,7 @@
 #pragma once
-#pragma comment(lib, "d3d12")
-#pragma comment(lib, "dxgi")
+#pragma comment(lib, "DXGI.lib")
+#pragma comment(lib, "D3DCompiler.lib")
+#pragma comment(lib, "D3D12.lib")
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN             // Exclude rarely-used stuff from Windows headers.

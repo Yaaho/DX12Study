@@ -1,6 +1,7 @@
 #pragma once
 #pragma comment(lib, "DXGI.lib")
 #pragma comment(lib, "D3DCompiler.lib")
+#pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "D3D12.lib")
 
 #ifndef WIN32_LEAN_AND_MEAN

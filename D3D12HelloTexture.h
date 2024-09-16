@@ -23,6 +23,7 @@ public:
     virtual void OnDestroy();
 
 private:
+    // 스왑체인에 쓰일 렌더 타겟(백 버퍼)의 개수. 거의 두개만 쓰임.
     static const UINT FrameCount = 2;
     static const UINT TextureWidth = 256;
     static const UINT TextureHeight = 256;
@@ -41,7 +42,12 @@ private:
     ComPtr<IDXGISwapChain3> m_swapChain;
     ComPtr<ID3D12Device> m_device;
     ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
-    ComPtr<ID3D12CommandAllocator> m_commandAllocator;
+
+    // Command list allocator 는 관련 커맨드 리스트가
+    // GPU 에서 실행을 완료한 경우에면 재설정 될 수 있다.
+    // 앱은 fence 를 사용하여 GPU 실행 진행 상황을 확인해야 한다.
+    // 그러므로 2개의 프레임으로 버퍼링을 하는 하는 이 예제에서는 2개가 필요하다.
+    ComPtr<ID3D12CommandAllocator> m_commandAllocator[2];
     ComPtr<ID3D12CommandQueue> m_commandQueue;
     ComPtr<ID3D12RootSignature> m_rootSignature;
     ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
@@ -59,11 +65,15 @@ private:
     UINT m_frameIndex;
     HANDLE m_fenceEvent;
     ComPtr<ID3D12Fence> m_fence;
-    UINT64 m_fenceValue;
+
+    // 프레임 2개를 버퍼링하므로 fence value 2개를 번갈아 사용한다.
+    UINT64 m_fenceValue[2];
 
     void LoadPipeline();
     void LoadAssets();
     std::vector<UINT8> GenerateTextureData();
     void PopulateCommandList();
-    void WaitForPreviousFrame();
+
+    void MoveToNextFrame();
+    void WaitForGPU();
 };

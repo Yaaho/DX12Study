@@ -8,6 +8,7 @@ D3D12HelloTexture::D3D12HelloTexture(UINT width, UINT height, std::wstring name)
     m_frameIndex(0),
     m_viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
     m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
+    m_fenceValue{},
     m_rtvDescriptorSize(0)
 {
 }
@@ -150,8 +151,11 @@ void D3D12HelloTexture::LoadPipeline()
         }
     }
 
-    // CommandAllocator 를 생성한다.
-    ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
+    // CommandAllocator 들을 생성한다.
+    for (UINT n = 0; n < 2; n++)
+    {
+        ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator[n])));
+    }
 }
 
 
@@ -269,7 +273,7 @@ void D3D12HelloTexture::LoadAssets()
 
     // Create the command list.
     // command list 생성
-    ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator.Get(), m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)));
+    ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_commandAllocator[m_frameIndex].Get(), m_pipelineState.Get(), IID_PPV_ARGS(&m_commandList)));
 
 
     // Create the vertex buffer.
@@ -388,7 +392,7 @@ void D3D12HelloTexture::LoadAssets()
 
         // 위에서 작성한 서브리소스를 업데이트 한다.
         UpdateSubresources(m_commandList.Get(), m_texture.Get(), textureUploadHeap.Get(), 0, 0, 1, &textureData);
-        // ResourceBarrier 를 복사 상태에서 픽셀셰이더 상태로 전환한다.
+        // ResourceBarrier 를 복사 상태에서 픽셀셰이더 리소스 상태로 전환한다.
         m_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_texture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
 
         // Describe and create a SRV for the texture.
@@ -414,8 +418,10 @@ void D3D12HelloTexture::LoadAssets()
     // GPU 가 설정한 지점까지 명령을 처리하면 CPU 가 그것을 알 수 있게 해준다.
     // fence 를 생성하고 어셋이 gpu 에 업로드 될 때까지 기다리는 코드이다.
     {
-        ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-        m_fenceValue = 1;
+        // m_fence 에 있는 fence 값을 설정한다.
+        ThrowIfFailed(m_device->CreateFence(m_fenceValue[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+        // 위에서 설정한 m_fence 에 있는 값은 이 값과 비교하게 된다.
+        m_fenceValue[m_frameIndex]++;
 
         // Create an event handle to use for frame synchronization.
         // 프레임 동기화에 사용할 이벤트 핸들을 만든다.
@@ -431,7 +437,7 @@ void D3D12HelloTexture::LoadAssets()
         // complete before continuing.
         // 커맨드 리스트가 실행될 때까지 기다린다.
         // 지금은 메인 루프에서 같은 커맨드 리스트를 재사용하고 있다.
-        WaitForPreviousFrame();
+        WaitForGPU();
     }
 }
 
@@ -492,7 +498,9 @@ void D3D12HelloTexture::OnRender()
     // Present the frame.
     ThrowIfFailed(m_swapChain->Present(1, 0));
 
-    WaitForPreviousFrame();
+    // 이전 프레임의 GPU 작업이 다 끝났는지 기다린 후에
+    // 다음 프레임의 CPU 계산으로 넘어가는 함수.
+    MoveToNextFrame();
 }
 
 
@@ -501,7 +509,7 @@ void D3D12HelloTexture::OnDestroy()
     // Ensure that the GPU is no longer referencing resources that are about to be
     // cleaned up by the destructor.
     // GPU 가 소멸자가 정리하려고 하는 리소스를 참조하지 않도록 이전 프레임이 끝날 때까지 대기한다.
-    WaitForPreviousFrame();
+    WaitForGPU();
 
     CloseHandle(m_fenceEvent);
 }
@@ -514,15 +522,16 @@ void D3D12HelloTexture::PopulateCommandList()
     // fences to determine GPU execution progress.
     // Command list allocator 는 관련 커맨드 리스트가
     // GPU 에서 실행을 완료한 경우에면 재설정 될 수 있다.
+    // 그러므로 프레임 버퍼링을 위해선 commandAllocator 두 개가 필요하다.
     // 앱은 fence 를 사용하여 GPU 실행 진행 상황을 확인해야 한다.
-    ThrowIfFailed(m_commandAllocator->Reset());
+    ThrowIfFailed(m_commandAllocator[m_frameIndex]->Reset());
 
     // However, when ExecuteCommandList() is called on a particular command 
     // list, that command list can then be reset at any time and must be before 
     // re-recording.
     // ExecuteCommandList() 가 특정 커맨드 리스트에서 실행되면
     // 해당 커맨드 리스트를 언제든지 다시 설정할 수 있으며, 다시 기록해야 한다.
-    ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get()));
+    ThrowIfFailed(m_commandList->Reset(m_commandAllocator[m_frameIndex].Get(), m_pipelineState.Get()));
 
     // Set necessary state.
     // 커맨드 리스트에 필요한 상태들을 설정한다.
@@ -569,43 +578,56 @@ void D3D12HelloTexture::PopulateCommandList()
 }
 
 
-void D3D12HelloTexture::WaitForPreviousFrame()
+
+
+// Wait for pending GPU work to complete.
+// GPU 의 작업이 끝날 때까지 기다림.
+void D3D12HelloTexture::WaitForGPU()
 {
-    // WAITING FOR THE FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-    // This is code implemented as such for simplicity. The D3D12HelloFrameBuffering
-    // sample illustrates how to use fences for efficient resource usage and to
-    // maximize GPU utilization.
-
-    // 프레임이 완료될때까지 기다리는 것은 바람직하지 않다
-    // 이것은 단순하게 구현된 코드이며
-    // D3D12HelloFrameBuffering 샘플은 효율적인 리소스 사용과 GPU 활용을 극대화하기 위해 Fence 를 사용하는 방법을 보여준다.
-
-    // Signal and increment the fence value.
+    // Schedule a Signal command in the queue.
     // commandQueue::signal 은 GPU 측에서 fence 값을 설정하는 것이고,
     // fence::signal 은 cpu 측에서 fence 값을 설정하는 것이다.
     // 여기서는 gpu 측에서 fence 값을 설정한다.
-    // gpu 가 모든 명령을 처리하기 전까지 새 fence 지점은 설정되지 않는다.
-    const UINT64 fence = m_fenceValue;
-    ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), fence));
-    // signal 을 호출한 되에 m_fenceValue 를 증가시킨다.
-    // 이것은 CPU 의 작업이 끝났다는 의미로 GPU 가 작업하는데 필요한 렌더링 데이터가 모두 입력되었다는 뜻이다. 
-    // ㄴ 이건 나중에 작업할 프레임 버퍼링에 해당되는 것이고, 이 프로젝트에는 해당하지 않음
-    m_fenceValue++;
+    // 이 signal 함수를 실행하기 전 gpu 에 할당된 모든 작업이 끝나야 여기서 호출한 m_fenceValue 가 m_fence 에 적용된다.
+    ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceValue[m_frameIndex]));
 
-    // Wait until the previous frame is finished.
-    // 이전 프레임이 끝날 때까지 기다린다.
-    // GPU 가 작업을 마쳤다면 이 if 문 안으로 들어가지 않는다.
-    // GetCompletedValue 함수를 통해 현재 fence 값을 가져오고, 위에서 지정한 fence 값과 비교하고 있다.
+    // Wait until the fence has been processed.
+    // fence 가 진행될 때까지 대기
+    ThrowIfFailed(m_fence->SetEventOnCompletion(m_fenceValue[m_frameIndex], m_fenceEvent));
+    WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+
+    // 현재 프레임에 사용하는 m_fenceValue 를 증가시킨다.
+    m_fenceValue[m_frameIndex]++;
+}
+
+void D3D12HelloTexture::MoveToNextFrame()
+{
+    // Schedule a Signal command in the queue.
+    // 현재 프레임의 m_fenceValue 값을 복사함
+    const UINT64 currentFenceValue = m_fenceValue[m_frameIndex];
+    ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), currentFenceValue));
+
+    // Update the frame index.
+    // 현재의 backbuffer 의 index 를 멤버변수에 저장한다.
+    // 현재 프레임의 CPU 작업이 끝났다는 의미로 GPU 가 작업하는데 필요한 렌더링 데이터가 모두 입력되었다는 뜻이다
+    // 이제 이전 프레임에 GPU 에 내린 명령이 끝났는지 기다리기 위해 frameindex 값을 바꾼다.
+    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+
+    // If the next frame is not ready to be rendered yet, wait until it is ready.
+    // 이전 프레임의 GPU 작업이 아직 끝나지 않았다면 이 if 문 안으로 들어오게 된다.
+    // GetCompletedValue 함수를 통해 현재 m_fence 객체 안에 있는 fence value 를 받아오고,
+    // 이를 이전 프레임에 설정한 m_fenceValue[m_frameIndex] 와 비교하고 있다
     // SetEventOnCompletion 를 통해 fence 가 특정 값에 도달할 때 발생해야 하는 이벤트를 지정한다.
     // 신호를 받을때까지 무한 대기한다.
-    if (m_fence->GetCompletedValue() < fence)
+    if (m_fence->GetCompletedValue() < m_fenceValue[m_frameIndex])
     {
-        // GPU 가 일을 마쳐서 gpu 가 처리하는 fence 값이 인자로 준 fence 값과 같게 되면
-        // Event 값이 true 가 되어서 GPU 의 일이 끝났다는 것이 알려진다.
-        ThrowIfFailed(m_fence->SetEventOnCompletion(fence, m_fenceEvent));
-        WaitForSingleObject(m_fenceEvent, INFINITE);
+        // GPU 가 이전 프레임에 할당된 일을 모두 마쳐서 gpu 가 처리하는 fence 값이 인자로 준 fence 값과 같게 되면
+        // Event 값이 true 가 되어서 이전 프레임에 내려진 GPU 일이 끝났다는 것이 알려진다.
+        ThrowIfFailed(m_fence->SetEventOnCompletion(m_fenceValue[m_frameIndex], m_fenceEvent));
+        WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
     }
 
-    // 현재의 backbuffer 의 index 를 멤버변수에 저장한다.
-    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+    // Set the fence value for the next frame.
+    // 다음 프레임을 위한 fence value 를 선택한다. (이 값은 프레임마다 1 증가한다)
+    m_fenceValue[m_frameIndex] = currentFenceValue + 1;
 }
